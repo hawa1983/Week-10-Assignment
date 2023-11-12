@@ -1,0 +1,413 @@
+---
+title: "Untitled"
+author: "Fomba Kassoh"
+date: "2023-11-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library(tidytext)
+library(janeaustenr)
+library(stringr)
+```
+
+
+
+
+```{r}
+original_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(text, 
+                                     regex("^chapter [\\divxlc]",
+                                           ignore_case = TRUE)))) %>%
+  ungroup()
+
+original_books
+
+```
+
+
+```{r}
+library(tidytext)
+tidy_books <- original_books %>%
+  unnest_tokens(word, text)
+
+tidy_books
+```
+
+
+```{r}
+data(stop_words)
+
+tidy_books <- tidy_books %>%
+  anti_join(stop_words)
+```
+
+
+```{r}
+library(tidytext)
+
+get_sentiments("afinn")
+```
+
+```{r}
+get_sentiments("bing")
+
+```
+
+```{r}
+get_sentiments("nrc")
+```
+
+```{r}
+nrc_joy <- get_sentiments("nrc") %>% 
+  filter(sentiment == "joy")
+
+tidy_books %>%
+  filter(book == "Emma") %>%
+  inner_join(nrc_joy) %>%
+  count(word, sort = TRUE)
+```
+
+```{r}
+library(tidyr)
+
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+jane_austen_sentiment
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x")
+```
+
+# Extension of Sentiment analysis of Jane Austen's books
+
+In this extension, I am using 6886 words from the mpqa word lexicon. The lexicon is read from a json file in Prof. William L Hamilton GitHub repository. William L Hamilton is an Assistant Professor at McGill University and Mila, working on machine learning, NLP, and network analysis.hip github repo can be found here https://github.com/williamleif
+
+```{r read json}
+# Install and load the required packages
+library(XML)
+library(jsonlite)
+library(rvest)
+library(httr)
+library(tidyverse)
+library(dplyr)
+
+# Load the JSON lexicon data into an R data frame
+mpqa_sentiment <- fromJSON("https://raw.githubusercontent.com/williamleif/socialsent/master/socialsent/data/lexicons/mpqa.json")
+mpqa_df <- as.data.frame(mpqa_sentiment)
+
+# This data frame is in a wide format with only one row 
+# The columns represent the words and the single row consist of the sentiments with -1 for negative and 1 for positive conotations. 
+
+# Convert the data frame from wide to long format
+mpqa_df <- pivot_longer(
+  data = mpqa_df, 
+  cols = everything(),        # Select all columns to make long
+  names_to = "word",          # Name of the new column created from data frame column names
+  values_to = "value"         # Name of the new column created from data frame values
+)
+
+# Rename data frame and convert value variable to negative/positive sentiment
+mpqa <- mpqa_df |>
+  mutate(
+    sentiment = if_else(value == 1, "positive", "negative")
+  )
+# View the long data frame
+print(mpqa)
+
+```
+
+
+```{r}
+library(tidyr)
+
+jane_austen_mpqa_sentiment <- tidy_books %>%
+  inner_join(mpqa) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+jane_austen_mpqa_sentiment
+```
+
+
+```{r}
+library(ggplot2)
+
+ggplot(jane_austen_mpqa_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x")
+```
+
+# Extension using the SentimentAnalysis package
+
+Data sets in package ‘SentimentAnalysis’:
+
+DictionaryGI               Dictionary with opinionated words from the Harvard-IV
+                           dictionary as used in the General Inquirer software
+DictionaryHE               Dictionary with opinionated words from Henry's
+                           Financial dictionary
+DictionaryLM               Dictionary with opinionated words from
+                           Loughran-McDonald Financial dictionary
+
+
+
+```{r}
+# Load the SentimentAnalysis package
+library(SentimentAnalysis)
+
+data <- data(package = 'SentimentAnalysis')
+GI_df <-rbind(
+  tibble(word = DictionaryGI$negative) |>
+  mutate(sentiment = "negative"),
+  tibble(word = DictionaryGI$positive) |>
+  mutate(sentiment = "positive"),
+  tibble(word = DictionaryHE$negative) |>
+  mutate(sentiment = "negative"),
+  tibble(word = DictionaryHE$positive) |>
+  mutate(sentiment = "positive"),
+  tibble(word = DictionaryLM$negative) |>
+  mutate(sentiment = "negative"),
+  tibble(word = DictionaryLM$positive) |>
+  mutate(sentiment = "positive")
+  )
+
+GI_df
+# Example text to analyze
+text <- "I love the quality of this product, it's amazing!"
+
+```
+
+# create a lexicon from the data sets in the qdapDictionaries package.
+
+The qdapDictionaries package contains datasets that connote action, amplifying, de-amplifying, negation, negative, positive, power, strength, weakness, and submission word lists. In this extension, I will create a separate data frame for each word list with a second column for sentiment for that word list. I then combine all the data frames to generate a qdap lexicon.I then mutated the data frame to create the following net sentiments
+
+sentiment = positive - negative
+strength = strong - weak
+amplify = ampplification - deamplification.
+
+The ggplots shows how each of these sentiments change throughout each of Jane Austens books.
+```{r}
+# Load the qdapDictionaries package
+library(qdap)
+library(tm)
+library(qdapDictionaries)
+
+data <-  data(package = "qdapDictionaries")
+
+action_df <- as.data.frame(action.verbs) |> #Action Word List
+  mutate(sentiment = "action") |>
+  rename(word = action.verbs)
+
+amplification_df <- as.data.frame(amplification.words) |> #Amplifying Words
+  mutate(sentiment = "amplification") |>
+  rename(word = amplification.words)
+
+deamplification_df <- as.data.frame(deamplification.words) |> #De-amplifying Words
+  mutate(sentiment = "deamplification") |>
+  rename(word = deamplification.words)
+
+
+negation_df <- as.data.frame(negation.words) |> #negation Words
+  mutate(sentiment = "negation") |>
+  rename(word = negation.words)
+
+negative_df <- as.data.frame(negative.words) |> #negative Words
+  mutate(sentiment = "negative") |>
+  rename(word = negative.words)
+
+positive_df <- as.data.frame(positive.words) |> #Positive Words
+  mutate(sentiment = "positive") |>
+  rename(word = positive.words)
+
+power_df <- as.data.frame(power.words) |> #Words that Indicate Power
+  mutate(sentiment = "power") |>
+  rename(word = power.words)
+
+strong_df <- as.data.frame(strong.words) |> #Words that Indicate Strength
+  mutate(sentiment = "strong") |>
+  rename(word = strong.words)
+
+submit_df <- as.data.frame(submit.words) |> #Words that Indicate Submission
+  mutate(sentiment = "submit") |>
+  rename(word = submit.words)
+
+weak_df <- as.data.frame(weak.words) |> #Words that Indicate Weakness
+  mutate(sentiment = "weak") |>
+  rename(word = weak.words)
+
+qdap_lex <- bind_rows(action_df,
+                         amplification_df, 
+                         deamplification_df, 
+                         negation_df, 
+                         negative_df,
+                         positive_df,
+                         power_df,
+                         strong_df,
+                         submit_df,
+                         weak_df)
+qdap_lex
+
+
+
+```
+
+```{r}
+library(tidyr)
+
+jane_austen_qdap_sentiment <- tidy_books %>%
+  inner_join(qdap_lex) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative, strength = strong - weak, amplify = amplification-deamplification)
+
+jane_austen_qdap_sentiment
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(jane_austen_qdap_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") + 
+  labs(title = 'Overall sentiments (positive - negative)')
+```
+
+```{r strength sentiment}
+library(ggplot2)
+
+ggplot(jane_austen_qdap_sentiment, aes(index, strength, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") + 
+  labs(title = 'Strength sentiments (strong - weak)')
+```
+
+
+
+```{r}
+library(ggplot2)
+
+ggplot(jane_austen_qdap_sentiment, aes(index, amplify, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") + 
+  labs(title = 'Amplification Sentiments (amplification - de-amplification)')
+```
+
+```{r}
+library(dplyr)
+library(rlang)
+
+# Assume you have a vector
+my_vector <- c(1, 2, 3)
+
+# Create a named vector using a tibble
+named_vector <- tibble(word = my_vector)
+
+# Print the name of the vector
+print(names(named_vector))
+
+```
+
+
+
+```{r}
+# Install and load the syuzhet package
+#install.packages("syuzhet")
+library(syuzhet)
+data(package = 'syuzhet')
+# Example text
+
+#Remove all empty line in original_books
+books_df <- original_books |> 
+  filter(text != "")
+
+books <- c("Sense & Sensibility", "Pride & Prejudice", "Mansfield Park", "Emma", "Northanger Abbey", "Persuasion")
+book_df <- data.frame()
+
+
+
+# Assuming 'books' is a character vector with book names
+# And 'original_books' is a data.frame with columns 'book' and 'text'
+
+# Initialize an empty data frame to store results
+# This should have the same structure as the final data you want to create
+books_df <- data.frame(book = character(), sentence = character(), score = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each book name in 'books'
+for(bk in books) {
+    # Filter 'original_books' for the current book
+    # Assuming there is a 'text' column that contains the book text
+    book_text <- original_books %>%
+        filter(book == bk) %>%
+        pull(text) # 'pull' extracts the 'text' column as a vector
+
+    # Flatten the book text into a single string
+    flattened_vector <- paste(book_text, collapse = " ")
+    
+    # Regular expression to split on period that is not preceded by "Mr" or "Mrs"
+    pattern <- "(?<!Mr)(?<!Mrs)\\.\\s+"
+    
+    # Split the flattened text into sentences
+    sentences <- unlist(strsplit(flattened_vector, pattern, perl = TRUE))
+    
+    # Trim sentences and add a period if missing
+    trimmed_and_dotted_sentences <- sapply(sentences, function(sentence) {
+        sentence <- trimws(sentence)
+        if (!grepl("\\.$", sentence)) {
+            sentence <- paste0(sentence, ".")
+        }
+        return(sentence)
+    })
+    
+    # Get the sentiment score for each sentence
+    sentiment_scores <- get_sentiment(trimmed_and_dotted_sentences, method="syuzhet")*10
+    
+    # Combine book name, sentences, and sentiment scores into a data frame
+    # Using 'tibble' to ensure that the lengths are recycled properly
+    temp_df <- tibble(book = bk, sentence = trimmed_and_dotted_sentences, score = sentiment_scores)
+    
+    # Bind the temp data frame to the main 'books_df'
+    books_df <- rbind(books_df, temp_df)
+}
+
+# After the loop, 'books_df' should contain all the results
+
+# Combine book name, sentences, and sentiment scores into a data frame
+  books_df <- books_df %>%
+      mutate(index = row_number())
+  
+  
+# Print the sentiment scores
+head(books_df)
+
+```
+
+
+```{r}
+library(ggplot2)
+
+
+ggplot(books_df, aes(index, score, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") +
+  labs(title = 'Amplification Sentiments (amplification - de-amplification)')
+```
+
+
