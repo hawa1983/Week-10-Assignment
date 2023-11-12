@@ -1,0 +1,380 @@
+---
+title: "Sentiment analysis with tidy data"
+author: "Fomba Kassoh and Souleymane Doumbia"
+date: "2023-11-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(XML)
+library(jsonlite)
+library(rvest)
+library(httr)
+library(tidyverse)
+```
+# Introducion
+This assignment consists of two parts. Part 1 loads and tests the existing code in Chapter 2 from https://www.tidytextmining.com/sentiment. Part 2 is an extension of the code and analysis using the Brown Corpus and two lexicons, the mpqa and SentimentAnalysis lexicons.
+
+The Brown corpus is composed of 501 texts. More information on the Brown corpus can be found at  http://icame.uib.no/brown/bcm.html. 
+
+# Part 1: Sentiment analysis of the Jane Austen Corpus
+
+Part 1 of this assignment is the primary example code from https://www.tidytextmining.com/sentiment 
+## Load the data from the Jane Austen Corpus
+```{r}
+library(janeaustenr)
+
+original_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(text, 
+                                     regex("^chapter [\\divxlc]",
+                                           ignore_case = TRUE)))) %>%
+  ungroup()
+
+head(original_books)
+
+```
+
+## Tokenize the text of the six books in the Jane Austen corpus
+```{r}
+library(tidytext)
+tidy_books <- original_books %>%
+  unnest_tokens(word, text)
+
+head(tidy_books)
+```
+
+## Remove stop words from the tokenized words
+```{r}
+data(stop_words)
+
+tidy_books <- tidy_books %>%
+  anti_join(stop_words)
+```
+
+## Display the words in the afinn lexicon 
+```{r}
+library(tidytext)
+
+head(get_sentiments("afinn"))
+```
+## Display the words in the bing lexicon 
+```{r}
+head(get_sentiments("bing"))
+```
+## Display the words in the nrc lexicon 
+```{r}
+head(get_sentiments("nrc"))
+```
+## Sentiment analysis using the bing lexicon
+```{r}
+library(tidyr)
+
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+head(jane_austen_sentiment)
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x")
+```
+
+# Part 2: Extension of Sentiment analysis
+
+I am using the Brown Corpus. Data and information from the corpus is located at http://icame.uib.no/brown/bcm.html. I used python code to download the corpus, tokenize it, and saved it in a data frame. I then sorted the data frame by the count of tokens and saved the top 12 in a separate data frame. I then used the data for my analysis
+
+## Part 2.1
+
+In this extension, I am using 6886 words from the mpqa word lexicon. The lexicon is read from a json file in Prof. William L Hamilton GitHub repository. William L Hamilton is an Assistant Professor at McGill University and Mila, working on machine learning, NLP, and network analysis.hip github repo can be found here https://github.com/williamleif
+
+This code loads the mpqa seniment.
+
+```{r mpqa sentiment}
+
+# Load the JSON lexicon data into an R data frame
+mpqa_sentiment <- fromJSON("https://raw.githubusercontent.com/williamleif/socialsent/master/socialsent/data/lexicons/mpqa.json")
+mpqa_df <- as.data.frame(mpqa_sentiment)
+
+# This data frame is in a wide format with only one row 
+# The columns represent the words and the single row consist of the sentiments with -1 for negative and 1 for positive sentiment. 
+
+# Convert the data frame from wide to long format
+mpqa_df <- pivot_longer(
+  data = mpqa_df, 
+  cols = everything(),        # Select all columns to make long
+  names_to = "word",          # Name of the new column created from data frame column names
+  values_to = "value"         # Name of the new column created from data frame values
+)
+
+# Rename data frame and mutate the data frame to add a column for negative/positive sentiment
+mpqa <- mpqa_df |>
+  mutate(
+    sentiment = if_else(value == 1, "positive", "negative")
+  )
+# View the long data frame
+head(mpqa)
+
+# Display the count of positive/negative sentiments
+mpqa |> group_by(sentiment) |>
+summarise(n = n())
+
+```
+
+### Load the a selecion of texts from the Brown corpus.
+The texts from the Brown corpus were read using a python code. A data frame was created of the 12 texts with the highest token counts. The python code and the data frame are in the github repo.
+
+```{r}
+library(tidyr)
+brown_corpus_top_12_token_count <- read_csv('https://raw.githubusercontent.com/hawa1983/Week-10-Assignment/main/brown_corpus_top_12_token_count.csv')
+glimpse(brown_corpus_top_12_token_count)
+```
+### Tokenize the texts
+
+```{r}
+library(tidytext)
+tidy_brown_text <- brown_corpus_top_12_token_count %>%
+  unnest_tokens(word, text)
+
+head(tidy_brown_text)
+```
+
+### Remove stop words from the text
+
+```{r}
+data(stop_words)
+
+tidy_brown_text <- tidy_brown_text %>%
+  anti_join(stop_words)
+
+head(tidy_brown_text)
+```
+### Join the mpqa and the tidy_brown_sentiment tables.
+This code joins the mpqa lexicon and the tidy_brown_text tables and calculate the sentiment for every 10 sentences.
+
+```{r}
+library(tidyr)
+
+tidy_brown_sentiment <- tidy_brown_text %>%
+  inner_join(mpqa) %>%
+  count(text_id, index = linenumber %/% 10, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+head(tidy_brown_sentiment)
+```
+### Sentiments using the mpqa lexicon
+The plots shows how the sentiment changed throughout the book. The texts with id cc14, ch17 and cn17 have mostly a positive sentiment. cn17 starts with positive sentiments. The texts in cp16, cp23, cp24, and cr03 are comprised mostly of negative sentiments. The texts in cn29, cp04, cp06 and cp15 are similarly composed mostly of negative seniments. 
+
+```{r}
+library(ggplot2)
+
+ggplot(tidy_brown_sentiment, aes(index, sentiment, fill = text_id)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~text_id, ncol = 4, scales = "free_x")
+```
+## Part 2.2
+
+This analysis used the SentimentAnalysis lexicon 
+
+Data sets in package ‘SentimentAnalysis’:
+
+DictionaryGI               Dictionary with opinionated words from the Harvard-IV
+                           dictionary as used in the General Inquirer software
+DictionaryHE               Dictionary with opinionated words from Henry's
+                           Financial dictionary
+DictionaryLM               Dictionary with opinionated words from
+                           Loughran-McDonald Financial dictionary
+                           
+These data sets are combined to create a single data frame
+
+```{r}
+# Load the SentimentAnalysis package
+library(SentimentAnalysis)
+
+data <- data(package = 'SentimentAnalysis')
+sentiment_df <-rbind(
+  tibble(word = DictionaryGI$negative) |>
+  mutate(sentiment = "negative"),
+  tibble(word = DictionaryGI$positive) |>
+  mutate(sentiment = "positive"),
+  tibble(word = DictionaryHE$negative) |>
+  mutate(sentiment = "negative"),
+  tibble(word = DictionaryHE$positive) |>
+  mutate(sentiment = "positive"),
+  tibble(word = DictionaryLM$negative) |>
+  mutate(sentiment = "negative"),
+  tibble(word = DictionaryLM$positive) |>
+  mutate(sentiment = "positive")
+  )
+
+head(sentiment_df)
+
+
+```
+
+### Join the SentimentAnalysis and the idy_brown_sentiment tables.
+This code joins the SentimentAnalysis lexicon and the tidy_brown_text tables and calculate the sentiment for every 10 sentences.
+
+```{r}
+library(tidyr)
+
+tidy_brown_GI_sentiment <- tidy_brown_text %>%
+  inner_join(sentiment_df) %>%
+  count(text_id, index = linenumber %/% 10, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+head(tidy_brown_GI_sentiment)
+```
+### Sentiments using the SentimentAnalysis package
+The plots shows how the sentiment changed throughout the book. The texts with id cc14 have mostly a positive sentiments. The rest of the other texts are composed mostly of negative sentiments.Overall, the sentiments analysis is similar to that of the mpqa lexicon. However, this lexicon shows more positive sentiments in cr03 than did th mpqa sentiment.
+
+```{r}
+library(ggplot2)
+
+ggplot(tidy_brown_GI_sentiment, aes(index, sentiment, fill = text_id)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~text_id, ncol = 4, scales = "free_x")
+```
+
+## Part 2.3 Analysis of the sentiments using the qdap lexicon
+
+The qdapDictionaries package contains datasets that have sentiments for action, amplifying, de-amplifying, negation, negative, positive, power, strength, weakness, and submission word lists. In this extension, I will create a separate data frame for each word list with a second column for sentiment for that word list. I then combine all the data frames to generate a qdap lexicon.I then mutated the data frame to create the following net sentiments
+
+sentiment = positive - negative
+strength = strong - weak
+amplify = ampplification - deamplification.
+
+
+```{r}
+# Load the qdapDictionaries package
+library(qdap)
+library(tm)
+library(qdapDictionaries)
+
+data <-  data(package = "qdapDictionaries")
+
+action_df <- as.data.frame(action.verbs) |> #Action Word List
+  mutate(sentiment = "action") |>
+  rename(word = action.verbs)
+
+amplification_df <- as.data.frame(amplification.words) |> #Amplifying Words
+  mutate(sentiment = "amplification") |>
+  rename(word = amplification.words)
+
+deamplification_df <- as.data.frame(deamplification.words) |> #De-amplifying Words
+  mutate(sentiment = "deamplification") |>
+  rename(word = deamplification.words)
+
+
+negation_df <- as.data.frame(negation.words) |> #negation Words
+  mutate(sentiment = "negation") |>
+  rename(word = negation.words)
+
+negative_df <- as.data.frame(negative.words) |> #negative Words
+  mutate(sentiment = "negative") |>
+  rename(word = negative.words)
+
+positive_df <- as.data.frame(positive.words) |> #Positive Words
+  mutate(sentiment = "positive") |>
+  rename(word = positive.words)
+
+power_df <- as.data.frame(power.words) |> #Words that Indicate Power
+  mutate(sentiment = "power") |>
+  rename(word = power.words)
+
+strong_df <- as.data.frame(strong.words) |> #Words that Indicate Strength
+  mutate(sentiment = "strong") |>
+  rename(word = strong.words)
+
+submit_df <- as.data.frame(submit.words) |> #Words that Indicate Submission
+  mutate(sentiment = "submit") |>
+  rename(word = submit.words)
+
+weak_df <- as.data.frame(weak.words) |> #Words that Indicate Weakness
+  mutate(sentiment = "weak") |>
+  rename(word = weak.words)
+
+qdap_lex <- bind_rows(action_df,
+                         amplification_df, 
+                         deamplification_df, 
+                         negation_df, 
+                         negative_df,
+                         positive_df,
+                         power_df,
+                         strong_df,
+                         submit_df,
+                         weak_df)
+qdap_lex
+
+
+
+```
+
+### Join the qdap and the tidy_brown_sentiment tables.
+This code joins the SentimentAnalysis lexicon and the tidy_brown_text tables and calculate the sentiment for every 10 sentences.
+
+```{r}
+library(tidyr)
+
+tidy_brown_qdap_sentiment <- tidy_brown_text %>%
+  inner_join(qdap_lex) %>%
+  count(text_id, index = linenumber %/% 10, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative, strength = strong - weak, amplify = amplification - deamplification)
+
+tidy_brown_qdap_sentiment
+```
+
+### Overall sentiments
+
+The overall sentiments is similar to that dipicted by the mpqa lexicon 
+
+```{r}
+library(ggplot2)
+
+ggplot(tidy_brown_qdap_sentiment, aes(index, sentiment, fill = text_id)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~text_id, ncol = 4, scales = "free_x") + 
+  labs(title = 'Overall sentiments (positive - negative)')
+```
+### Strength Sentiment analysis
+The plots shows that there is a predominant use of strength words than words that express weakness through out each of the texts.
+
+```{r strength sentiment}
+library(ggplot2)
+
+ggplot(tidy_brown_qdap_sentiment, aes(index, strength, fill = text_id)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~text_id, ncol = 4, scales = "free_x") + 
+  labs(title = 'Distribution of strength sentiments (strong - weak)')
+```
+### Amplification Sentiment analysis
+The plots shows that there are few words in the texts that expressed amplifying or de-amplifying words..
+
+```{r}
+library(ggplot2)
+
+ggplot(tidy_brown_qdap_sentiment, aes(index, amplify, fill = text_id)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~text_id, ncol = 4, scales = "free_x") + 
+  labs(title = 'Distribution of amplification Sentiments (amplification - de-amplification)')
+```
+
